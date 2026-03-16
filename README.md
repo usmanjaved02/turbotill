@@ -1,6 +1,6 @@
 <div align="center">
 
-# Turbo Tll
+# Turbo Till
 
 ### Realtime Gemini Live ordering assistant for modern food businesses
 
