@@ -1,0 +1,138 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _AR_HOST: us-central1-docker.pkg.dev
+  _AR_REPO: turbotill
+  _SERVICE_NAME: turbotill-api
+  _REGION: us-central1
+  _CPU: "1"
+  _MEMORY: 512Mi
+  _CONCURRENCY: "80"
+  _MIN_INSTANCES: "0"
+  _MAX_INSTANCES: "10"
+  _TIMEOUT: 300s
+  _INGRESS: all
+  _ALLOW_UNAUTHENTICATED: "true"
+  _SERVICE_ACCOUNT: ""
+  _SECRET_MONGODB_URI: MONGODB_URI:latest
+  _SECRET_JWT_ACCESS_SECRET: JWT_ACCESS_SECRET:latest
+  _SECRET_GEMINI_API_KEY: ""
+  _NODE_ENV: production
+  _FRONTEND_ORIGIN: ""
+  _COOKIE_DOMAIN: ""
+  _HEALTH_CHECK_PATH: /healthz
+  _VPC_CONNECTOR: ""
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - server/Dockerfile
+      - -t
+      - ${_AR_HOST}/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:${BUILD_ID}
+      - server
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_AR_HOST}/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:${BUILD_ID}
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        IMAGE="${_AR_HOST}/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:${BUILD_ID}"
+        DEPLOY_ARGS=(
+          run deploy "${_SERVICE_NAME}"
+          --image "$$IMAGE"
+          --region "${_REGION}"
+          --platform managed
+          --port 8080
+          --cpu "${_CPU}"
+          --memory "${_MEMORY}"
+          --concurrency "${_CONCURRENCY}"
+          --min-instances "${_MIN_INSTANCES}"
+          --max-instances "${_MAX_INSTANCES}"
+          --timeout "${_TIMEOUT}"
+          --ingress "${_INGRESS}"
+        )
+
+        if [[ -n "${_SERVICE_ACCOUNT}" ]]; then
+          DEPLOY_ARGS+=(--service-account "${_SERVICE_ACCOUNT}")
+        fi
+
+        if [[ -n "${_SECRET_MONGODB_URI}" ]]; then
+          DEPLOY_ARGS+=(--set-secrets "MONGODB_URI=${_SECRET_MONGODB_URI}")
+        fi
+
+        if [[ -n "${_SECRET_JWT_ACCESS_SECRET}" ]]; then
+          DEPLOY_ARGS+=(--set-secrets "JWT_ACCESS_SECRET=${_SECRET_JWT_ACCESS_SECRET}")
+        fi
+
+        if [[ -n "${_SECRET_GEMINI_API_KEY}" ]]; then
+          DEPLOY_ARGS+=(--set-secrets "GEMINI_API_KEY=${_SECRET_GEMINI_API_KEY}")
+        fi
+
+        if [[ -n "${_NODE_ENV}" ]]; then
+          DEPLOY_ARGS+=(--set-env-vars "NODE_ENV=${_NODE_ENV}")
+        fi
+
+        if [[ -n "${_FRONTEND_ORIGIN}" ]]; then
+          DEPLOY_ARGS+=(--set-env-vars "FRONTEND_ORIGIN=${_FRONTEND_ORIGIN}")
+        fi
+
+        if [[ -n "${_COOKIE_DOMAIN}" ]]; then
+          DEPLOY_ARGS+=(--set-env-vars "COOKIE_DOMAIN=${_COOKIE_DOMAIN}")
+        fi
+
+        if [[ -n "${_VPC_CONNECTOR}" ]]; then
+          DEPLOY_ARGS+=(--vpc-connector "${_VPC_CONNECTOR}" --vpc-egress private-ranges-only)
+        fi
+
+        if [[ "${_ALLOW_UNAUTHENTICATED}" == "true" ]]; then
+          DEPLOY_ARGS+=(--allow-unauthenticated)
+        else
+          DEPLOY_ARGS+=(--no-allow-unauthenticated)
+        fi
+
+        gcloud "$${DEPLOY_ARGS[@]}"
+
+        if [[ "${_ALLOW_UNAUTHENTICATED}" == "true" ]]; then
+          set +e
+          gcloud run services add-iam-policy-binding "${_SERVICE_NAME}" \
+            --project "${PROJECT_ID}" \
+            --region "${_REGION}" \
+            --member "allUsers" \
+            --role "roles/run.invoker"
+          BIND_EXIT=$$?
+          set -e
+
+          if [[ $$BIND_EXIT -ne 0 ]]; then
+            echo "WARN: Could not grant allUsers run.invoker. Service may return 403 unless authenticated invocation is used."
+          fi
+        fi
+
+        SERVICE_URL="$$(gcloud run services describe "${_SERVICE_NAME}" --project "${PROJECT_ID}" --region "${_REGION}" --format='value(status.url)')"
+        echo "Service URL: $$SERVICE_URL"
+
+        HEALTH_URL="$$SERVICE_URL${_HEALTH_CHECK_PATH}"
+        UNAUTH_STATUS="$$(curl -sS -o /tmp/health-unauth.txt -w '%{http_code}' "$$HEALTH_URL" || true)"
+        echo "Unauthenticated health status: $$UNAUTH_STATUS"
+        if [[ "$$UNAUTH_STATUS" != "200" && "$$UNAUTH_STATUS" != "503" ]]; then
+          echo "Health check response preview:"
+          sed -n '1,20p' /tmp/health-unauth.txt || true
+          echo "Invoker IAM bindings:"
+          gcloud run services get-iam-policy "${_SERVICE_NAME}" \
+            --project "${PROJECT_ID}" \
+            --region "${_REGION}" \
+            --flatten='bindings[]' \
+            --filter='bindings.role=roles/run.invoker' \
+            --format='table(bindings.members)' || true
+          echo "WARN: Public health check failed. Deployment completed but service may still be inaccessible."
+        fi
+
+images:
+  - ${_AR_HOST}/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:${BUILD_ID}

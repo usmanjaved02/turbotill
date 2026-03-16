@@ -1,0 +1,22 @@
+flowchart LR
+    U[User] -->|Voice input| FE[Frontend Web App turbotill xyz]
+    FE -->|Step 1 Request session| BE[Backend API Cloud Run api turbotill xyz]
+    BE -->|Step 2 Create ephemeral token| GL[Gemini Live API]
+    GL -->|Ephemeral token| BE
+    BE -->|Session token + guardrails| FE
+
+    FE -->|Step 3 Direct realtime stream| GL
+    GL -->|Step 4 Realtime response| FE
+    FE -->|Assistant response playback| U
+
+    FE -->|Step 5 Send transcript| BE
+    BE -->|Step 6 Extract order draft| GL
+    GL -->|Order draft| BE
+    BE -->|Step 7 Validate readiness| DEC{readyToPlace}
+    DEC -- No --> FE
+    FE -->|Ask follow-up question| U
+    DEC -- Yes --> OS[Order Service]
+    OS -->|Step 8 Persist order| DB[(MongoDB Atlas)]
+    OS -->|Step 9 Optional webhook| WH[Merchant External Webhook]
+    OS -->|Step 10 Final response| FE
+    FE -->|Order placed confirmation| U
