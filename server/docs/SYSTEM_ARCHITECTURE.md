@@ -153,26 +153,26 @@ Exported assets:
 
 ```mermaid
 flowchart LR
-    U[User] -->|Voice/Text input| FE[Frontend Web App]
-    FE -->|1) Request ephemeral session| BE[Backend API on Cloud Run]
-    BE -->|2) Server-authenticated token creation| GL[Gemini Live API]
+    U[User] -->|Voice input| FE[Frontend Web App turbotill xyz]
+    FE -->|Step 1 Request session| BE[Backend API Cloud Run api turbotill xyz]
+    BE -->|Step 2 Create ephemeral token| GL[Gemini Live API]
     GL -->|Ephemeral token| BE
     BE -->|Session token + guardrails| FE
 
-    FE -->|3) Direct realtime stream| GL
-    GL -->|4) Realtime response text/audio| FE
-    FE -->|Assistant response playback/UI update| U
+    FE -->|Step 3 Direct realtime stream| GL
+    GL -->|Step 4 Realtime response| FE
+    FE -->|Assistant response playback| U
 
-    FE -->|5) Send transcript + metadata| BE
-    BE -->|6) Extract structured order draft| GL
+    FE -->|Step 5 Send transcript| BE
+    BE -->|Step 6 Extract order draft| GL
     GL -->|Order draft| BE
-    BE -->|7) Validate readiness| DEC{readyToPlace?}
+    BE -->|Step 7 Validate readiness| DEC{readyToPlace}
     DEC -- No --> FE
     FE -->|Ask follow-up question| U
     DEC -- Yes --> OS[Order Service]
-    OS -->|8) Persist order + timeline| DB[(MongoDB)]
-    OS -->|9) Optional webhook notification| WH[Merchant/External Webhook]
-    OS -->|10) Final order response| FE
+    OS -->|Step 8 Persist order| DB[(MongoDB Atlas)]
+    OS -->|Step 9 Optional webhook| WH[Merchant External Webhook]
+    OS -->|Step 10 Final response| FE
     FE -->|Order placed confirmation| U
 ```
 
@@ -244,15 +244,15 @@ Key behavior:
 ```mermaid
 flowchart TD
     R1[Audit API request] --> S1[Audit Service]
-    S1 -->|small export| I1[Inline CSV/JSON response]
-    S1 -->|large export| J1[Create AuditExportJob pending]
+    S1 -->|small export| I1[Inline CSV or JSON response]
+    S1 -->|large export| J1[Create audit export job]
 
-    W1[Background Export Worker Timer] --> P1[Scan pending jobs]
+    W1[Background export worker timer] --> P1[Scan pending jobs]
     P1 --> P2[Generate export file]
-    P2 --> F1[/uploads/exports]
-    P2 --> D1[(AuditExportJob status=completed)]
+    P2 --> F1[Uploads exports directory]
+    P2 --> D1[(AuditExportJob completed)]
 
-    W2[Geo Cache Monitor Timer] --> M1[Snapshot counters]
+    W2[Geo cache monitor timer] --> M1[Snapshot counters]
     M1 --> D2[(GeoIpMetricSnapshot)]
     M1 --> C1[Cleanup expired GeoIpCache]
 ```
